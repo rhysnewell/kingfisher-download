@@ -204,6 +204,10 @@ if __name__ == '__main__':
         help='extra arguments to pass to ascp e.g. \'-k 2\' to resume with a \
         sparse file checksum [default: \'\']',
         default='')
+    parser.add_argument(
+        '--sra-direct-extraction', '--sra_direct_extraction',
+        help='Use the NGS API to extract reads rather than fasterq-dump [default: do not, use fasterq-dump]',
+        action='store_true')
 
     parser.add_argument('--debug', help='output debug information',
                         action="store_true", default=False)
@@ -424,42 +428,49 @@ if __name__ == '__main__':
     if not skip_download_and_extraction:
         if downloaded_files == ['{}.sra'.format(args.run_identifier)]:
             if 'sra' not in args.output_format_possibilities:
-                logging.info("Extracting .sra file with fasterq-dump ..")
-                extern.run("fasterq-dump ./{}.sra".format(args.run_identifier))
-                os.remove('{}.sra'.format(args.run_identifier))
-
-                if 'fastq' not in args.output_format_possibilities:
-                    for fq in ['x_1.fastq','x_2.fastq','x.fastq']:
-                        f = fq.replace('x',args.run_identifier)
-                        if os.path.exists(f):
-                            # Do the least work, currently we have FASTQ.
-                            if 'fasta' in args.output_format_possibilities:
-                                logging.info("Converting {} to FASTA ..".format(f))
-                                out_here = f.replace('.fastq','.fasta')
-                                extern.run("awk '{{print \">\" substr($0,2);getline;print;getline;getline}}' {} >{}".format(
-                                    f, out_here
-                                ))
-                                os.remove(f)
-                                output_files.append(out_here)
-                            elif 'fasta.gz' in args.output_format_possibilities:
-                                logging.info("Converting {} to FASTA and compressing with pigz ..".format(f))
-                                out_here = f.replace('.fastq','.fasta.gz')
-                                extern.run("awk '{{print \">\" substr($0,2);getline;print;getline;getline}}' {} |pigz >{}".format(
-                                    f, out_here
-                                ))
-                                os.remove(f)
-                                output_files.append(out_here)
-                            elif 'fastq.gz' in args.output_format_possibilities:
-                                logging.info("Compressing {} with pigz ..".format(f))
-                                extern.run("pigz {}".format(f))
-                                output_files.append("{}.gz".format(f))
-                            else:
-                                raise Exception("Programming error")
+                if 'fasta' in args.output_format_possibilities and args.sra_direct_extraction:
+                    # Only import here because otherwise the python bindings
+                    # would not be found in many installs.
+                    from kingfisher.sra_direct_extractor import DirectSRAExtractor
+                    output_files = DirectSRAExtractor().dump_to_fasta(downloaded_files[0])
+                    os.remove('{}.sra'.format(args.run_identifier))
                 else:
-                    for fq in ['x_1.fastq','x_2.fastq','x.fastq']:
-                        f = fq.replace('x',args.run_identifier)
-                        if os.path.exists(f):
-                            output_files.append(f)
+                    logging.info("Extracting .sra file with fasterq-dump ..")
+                    extern.run("fasterq-dump ./{}.sra".format(args.run_identifier))
+                    os.remove('{}.sra'.format(args.run_identifier))
+
+                    if 'fastq' not in args.output_format_possibilities:
+                        for fq in ['x_1.fastq','x_2.fastq','x.fastq']:
+                            f = fq.replace('x',args.run_identifier)
+                            if os.path.exists(f):
+                                # Do the least work, currently we have FASTQ.
+                                if 'fasta' in args.output_format_possibilities:
+                                    logging.info("Converting {} to FASTA ..".format(f))
+                                    out_here = f.replace('.fastq','.fasta')
+                                    extern.run("awk '{{print \">\" substr($0,2);getline;print;getline;getline}}' {} >{}".format(
+                                        f, out_here
+                                    ))
+                                    os.remove(f)
+                                    output_files.append(out_here)
+                                elif 'fasta.gz' in args.output_format_possibilities:
+                                    logging.info("Converting {} to FASTA and compressing with pigz ..".format(f))
+                                    out_here = f.replace('.fastq','.fasta.gz')
+                                    extern.run("awk '{{print \">\" substr($0,2);getline;print;getline;getline}}' {} |pigz >{}".format(
+                                        f, out_here
+                                    ))
+                                    os.remove(f)
+                                    output_files.append(out_here)
+                                elif 'fastq.gz' in args.output_format_possibilities:
+                                    logging.info("Compressing {} with pigz ..".format(f))
+                                    extern.run("pigz {}".format(f))
+                                    output_files.append("{}.gz".format(f))
+                                else:
+                                    raise Exception("Programming error")
+                    else:
+                        for fq in ['x_1.fastq','x_2.fastq','x.fastq']:
+                            f = fq.replace('x',args.run_identifier)
+                            if os.path.exists(f):
+                                output_files.append(f)
             else:
                 output_files.append("{}.sra".format(args.run_identifier))
         else:
