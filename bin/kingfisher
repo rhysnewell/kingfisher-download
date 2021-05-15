@@ -46,6 +46,12 @@ class MyParser(argparse.ArgumentParser):
         else:
             return argparse.ArgumentParser.format_help(self)
 
+class ArgumentKwargsList:
+    def __init__(self):
+        self.argument_kwargs = []
+        
+    def add_argument(self, **kwargs):
+        self.argument_kwargs.append(kwargs)
 
 def add_extraction_args(parser):
     parser.add_argument(
@@ -72,19 +78,7 @@ def add_extraction_args(parser):
         help='Output sequences to STDOUT. Currently requires --unsorted [default: Do not].')
     return parser
 
-
-
-if __name__ == '__main__':
-    parent_parser = argparse.ArgumentParser(add_help=False)
-    parent_parser.add_argument('--debug', help='output debug information', action="store_true")
-    parent_parser.add_argument('--version', help='output version information and quit',  action='version', version=kingfisher.__version__)
-    parent_parser.add_argument('--quiet', help='only output errors', action="store_true")
-
-    parser = argparse.ArgumentParser(parents=[parent_parser])
-    subparsers = parser.add_subparsers(title="Sub-commands", dest='subparser_name')#, parser_class=MyParser)
-    subparser_name_to_parser = {}
-
-    def new_subparser(subparsers, parser_name, parser_description):
+def new_subparser(subparsers, parser_name, parser_description, subparser_name_to_parser):
         subpar = subparsers.add_parser(parser_name,
                                        description=parser_description,
                                        help=parser_description,
@@ -95,56 +89,62 @@ if __name__ == '__main__':
         #     '--%s' % MyParser.FULL_HELP_FLAG.replace('-','_'),
         #     action='store_true', default=False, help='display all help options')
         subparser_name_to_parser[parser_name] = subpar
-        return subpar
+        return subpar, subparser_name_to_parser
 
-    get_description = 'Download and extract public sequence files from SRA or ENA'
-    get_parser = new_subparser(subparsers, 'get', get_description)
+get_description = 'Download and extract public sequence files from SRA or ENA'
+extract_description = 'extract .sra format files'
 
-    get_parser.add_argument(
+def generate_get_argparser():
+    get_parser = argparse.ArgumentParser(add_help=get_description)#new_subparser(subparsers, 'get', get_description, subparser_name_to_parser)
+
+    required_args = get_parser.add_argument_group('REQUIRED ARGUMENTS')
+    required_args.add_argument(
         '--run-identifier','--run_identifier','-r',
         help='Run number to download/extract e.g. ERR1739691',
         required=True)
-    get_parser.add_argument(
+    required_args.add_argument(
         '-m','--download_methods', '--download-methods',
         nargs='+',
         help='How to download .sra file. If multiple are specified, each is tried in turn until one works.',
         choices=['aws-http', 'prefetch', 'aws-cp', 'gcp-cp', 'ena-ascp','ena-ftp'], required=True)
 
+    
     get_parser = add_extraction_args(get_parser)
 
-    get_parser.add_argument(
+    download_args = get_parser.add_argument_group('DOWNLOAD OPTIONS')
+    download_args.add_argument(
         '--gcp-project', '--gcp_project',
         help='Downloading from Google Cloud buckets require a Google project to charge '
         '(they are requester-pays) e.g. \'my-project\'. This can alternately be set '
         'beforehand using \'gcloud config set project PROJECT_ID\' '
         '[default: value of `gcloud config get-value project` command]')
-    get_parser.add_argument(
+    download_args.add_argument(
         '--gcp-user-key-file', '--gcp_user_key_file',
         help='Downloading from Google Cloud buckets requires a Google user to be setup. \
             Use this option to specify a JSON-formatted service account key, as per \
             https://cloud.google.com/iam/docs/creating-managing-service-account-keys \
             [default: not used]')
-    get_parser.add_argument(
+    download_args.add_argument(
         '--aws-user-key-id', '--aws_user_key_id',
         help='Downloading from AWS requester pays buckets requires a key ID and secret key \
             [default: not used]')
-    get_parser.add_argument(
+    download_args.add_argument(
         '--aws-user-key-secret', '--aws_user_key_secret',
         help='Downloading from AWS requester pays buckets requires a key ID and secret key \
             [default: not used]')
-    get_parser.add_argument(
+    download_args.add_argument(
         '--allow-paid', '--allow_paid',
         help='Allow downloading from retriever-pays s3 and GCP buckets',
         action='store_true')
-    get_parser.add_argument(
+    download_args.add_argument(
         '--allow-paid-from-gcp', '--allow_paid_from_gcp',
         help='Allow downloading from retriever-pays GCP buckets',
         action='store_true')
-    get_parser.add_argument(
+    download_args.add_argument(
         '--allow-paid-from-aws', '--allow_paid_from_aws',
         help='Allow downloading from retriever-pays AWS buckets',
         action='store_true')
-    get_parser.add_argument(
+    download_args.add_argument(
         '--ascp-ssh-key', '--ascp_ssh_key',
         help='\'linux\' or \'osx\' for default paths used in each OS ({} and {} respectively), \
             otherwise a path to the openssh key to used for aspera (i.e. the \
@@ -153,22 +153,50 @@ if __name__ == '__main__':
                 DEFAULT_OSX_ASPERA_SSH_KEY_LOCATION,
                 kingfisher.DEFAULT_ASPERA_SSH_KEY),
         default=kingfisher.DEFAULT_ASPERA_SSH_KEY)
-    get_parser.add_argument(
+    download_args.add_argument(
         '--ascp-args', '--ascp_args',
         help='extra arguments to pass to ascp e.g. \'-k 2\' to resume with a \
         sparse file checksum [default: \'\']',
         default='')
+    return get_parser
 
-    extract_description = 'extract .sra format files'
-    extract_parser = new_subparser(subparsers, 'extract', extract_description)
+def get_argparser():
+    parent_parser = argparse.ArgumentParser(add_help=False)
+    parent_parser.add_argument('--debug', help='output debug information', action="store_true")
+    parent_parser.add_argument('--version', help='output version information and quit',  action='version', version=kingfisher.__version__)
+    parent_parser.add_argument('--quiet', help='only output errors', action="store_true")
 
-    extract_parser.add_argument(
-        '--sra',
-        help='Extract this SRA file [required]',
-        required=True)
+    parser = argparse.ArgumentParser(parents=[parent_parser])
+    subparsers = parser.add_subparsers(title="Sub-commands", dest='subparser_name')#, parser_class=MyParser)
+    subparser_name_to_parser = {}
 
-    extract_parser = add_extraction_args(extract_parser)
+    get_parser = generate_get_argparser()
+    subpar = subparsers.add_parser('get',
+                                    description=get_parser.add_help,
+                                    help=get_parser.add_help,
+                                    epilog=__author__,
+                                    parents=[parent_parser])
+    subparser_name_to_parser['get'] = get_parser      
+    # subpar.add_argument(
+    #     '--%s' % MyParser.FULL_HELP_FLAG,
+    #     '--%s' % MyParser.FULL_HELP_FLAG.replace('-','_'),
+    #     action='store_true', default=False, help='display all help options')
+    subparser_name_to_parser[parser_name] = subpar
+    parser = add_my_subparser(parser, get_parser, subparser_name_to_parser)
+    
+    # extract_parser = new_subparser(subparsers, 'extract', extract_description)
 
+    # extract_parser.add_argument(
+    #     '--sra',
+    #     help='Extract this SRA file [required]',
+    #     required=True)
+
+    # extract_parser = add_extraction_args(extract_parser)
+
+    return parent_parser
+
+if __name__ == '__main__':
+    parser = get_argparser()
 
     if (len(sys.argv) == 1 or sys.argv[1] == '-h' or sys.argv[1] == '--help'):
         print('')
